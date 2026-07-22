@@ -223,6 +223,7 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
       hostnames=["localhost"],
       workers_per_host=num_gpus,
       backend=None,  # Let rsl_rl handle process group initialization.
+      agent_timeout=300,
       copy_env_vars=torchrunx.DEFAULT_ENV_VARS_FOR_COPY + ("MUJOCO*",),
     ).run(run_train, task_id, args, log_dir)
 
