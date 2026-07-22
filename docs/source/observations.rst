@@ -217,6 +217,23 @@ tensors.
      - Height above each raycast hit point from a ``RayCastSensor``.
        Requires ``params={"sensor_name": "<name>"}``.
 
+
+Disturbance observer
+--------------------
+
+``disturbance_observer`` is a stateful momentum observer for floating-base robots.
+It evaluates ``M(q) qdot`` and ``qfrc_bias`` using a private copy of the nominal
+MuJoCo model, then estimates generalized forces that are not explained by nominal
+dynamics and actuator force. ``mode="full_order"`` returns all floating-base and
+joint components; ``mode="roam"`` zeros floating-base translation in the observer
+model and removes the three translational components from the output.
+
+The Unitree G1 flat tasks expose registered PPO, PPO + Full-Order, and PPO + ROAM
+variants. Their observer estimate is the final actor term and is not included in the
+critic group. Policy exports record the observation order, observer mode, and output
+component names. The play configurations visualize root force/torque estimates and
+the eight largest joint residuals.
+
 For ``builtin_sensor`` and ``height_scan``, the ``sensor_name`` parameter
 must match a sensor registered in the scene. See :ref:`sensors` for how
 to configure sensors.

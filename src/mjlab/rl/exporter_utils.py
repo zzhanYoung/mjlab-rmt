@@ -87,7 +87,7 @@ def get_base_metadata(
     observation_term_flatten_history_dim.append(cfg.flatten_history_dim)
     observation_term_history_length.append(cfg.history_length)
 
-  return {
+  metadata: dict[str, list | str | float] = {
     "run_path": run_path,
     "joint_names": list(robot.joint_names),
     "joint_stiffness": joint_stiffness.tolist(),
@@ -103,6 +103,15 @@ def get_base_metadata(
     if isinstance(joint_action._scale, torch.Tensor)
     else joint_action._scale,
   }
+
+  if "disturbance_estimate" in observation_names:
+    observer_cfg = env.observation_manager.get_term_cfg("actor", "disturbance_estimate")
+    observer = observer_cfg.func
+    if hasattr(observer, "mode") and hasattr(observer, "dof_names"):
+      metadata["disturbance_observer_mode"] = observer.mode
+      metadata["disturbance_observer_dof_names"] = observer.dof_names
+
+  return metadata
 
 
 def attach_metadata_to_onnx(

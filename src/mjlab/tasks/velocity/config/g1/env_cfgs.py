@@ -7,7 +7,13 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.envs.mdp.disturbance_observer import (
+  DisturbanceObserverVizCfg,
+  ObserverMode,
+)
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.metrics_manager import MetricsTermCfg
+from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.sensor import (
   ContactMatch,
@@ -22,7 +28,10 @@ from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 
-def unitree_g1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def unitree_g1_rough_env_cfg(
+  play: bool = False,
+  actor_base_vel: bool = True,
+) -> ManagerBasedRlEnvCfg:
   """Create Unitree G1 rough terrain velocity configuration."""
   cfg = make_velocity_env_cfg()
 
@@ -160,6 +169,10 @@ def unitree_g1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={"sensor_name": self_collision_cfg.name, "force_threshold": 10.0},
   )
 
+  if not actor_base_vel:
+    cfg.observations["actor"].terms.pop("base_lin_vel", None)
+  assert "base_lin_vel" in cfg.observations["critic"].terms
+
   # Apply play mode overrides.
   if play:
     # Effectively infinite episode length.
@@ -185,9 +198,13 @@ def unitree_g1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   return cfg
 
 
-def unitree_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def unitree_g1_flat_env_cfg(
+  play: bool = False,
+  actor_base_vel: bool = True,
+  observer_mode: ObserverMode | None = None,
+) -> ManagerBasedRlEnvCfg:
   """Create Unitree G1 flat terrain velocity configuration."""
-  cfg = unitree_g1_rough_env_cfg(play=play)
+  cfg = unitree_g1_rough_env_cfg(play=play, actor_base_vel=actor_base_vel)
 
   cfg.sim.njmax = 300
   cfg.sim.mujoco.ccd_iterations = 50
@@ -210,6 +227,26 @@ def unitree_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # Disable terrain curriculum (not present in play mode since rough clears all).
   cfg.curriculum.pop("terrain_levels", None)
+
+  if observer_mode is not None:
+    cfg.observations["actor"].terms["disturbance_estimate"] = ObservationTermCfg(
+      func=envs_mdp.disturbance_observer,
+      params={
+        "mode": observer_mode,
+        "bandwidth_hz": 5.0,
+        "estimate_clip": 1000.0,
+        "debug_vis": play,
+        "viz_cfg": DisturbanceObserverVizCfg(),
+      },
+      clip=(-1000.0, 1000.0),
+    )
+    cfg.metrics["disturbance_estimate_rms"] = MetricsTermCfg(
+      func=envs_mdp.disturbance_estimate_rms
+    )
+    cfg.metrics["disturbance_estimate_peak"] = MetricsTermCfg(
+      func=envs_mdp.disturbance_estimate_peak,
+      reduce="max",
+    )
 
   if play:
     twist_cmd = cfg.commands["twist"]

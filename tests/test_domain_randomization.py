@@ -849,6 +849,40 @@ def test_pseudo_inertia_alpha_only_scales_mass(inertia_env):
   assert torch.allclose(ipos, def_ipos.unsqueeze(0).expand_as(ipos), atol=1e-5)
 
 
+def test_point_mass_payload_updates_mass_com_and_inertia(device):
+  """A mounted payload is added through a physically consistent pseudo-inertia."""
+  env = _make_inertia_env(device)
+  robot = env.scene["robot"]
+  body_cfg = SceneEntityCfg("robot", body_names=("base",))
+  body_cfg.resolve(env.scene)
+  body_ids = robot.indexing.body_ids[body_cfg.body_ids]
+
+  def_mass = env.sim.get_default_field("body_mass")[body_ids].clone()
+  def_ipos = env.sim.get_default_field("body_ipos")[body_ids].clone()
+  payload_mass = 5.0
+  payload_pos = torch.tensor([0.0, 0.0, 0.2], device=env.device)
+
+  dr.point_mass_payload(
+    env,
+    env_ids=None,
+    mass_range=(payload_mass, payload_mass),
+    position=(0.0, 0.0, 0.2),
+    asset_cfg=body_cfg,
+  )
+
+  mass = env.sim.model.body_mass[:, body_ids]
+  ipos = env.sim.model.body_ipos[:, body_ids]
+  expected_mass = def_mass + payload_mass
+  expected_ipos = (
+    def_mass[..., None] * def_ipos + payload_mass * payload_pos
+  ) / expected_mass[..., None]
+  torch.testing.assert_close(mass, expected_mass.unsqueeze(0).expand_as(mass))
+  torch.testing.assert_close(
+    ipos, expected_ipos.unsqueeze(0).expand_as(ipos), atol=1e-5, rtol=1e-5
+  )
+  assert torch.all(env.sim.model.body_inertia[:, body_ids] > 0.0)
+
+
 def test_pseudo_inertia_t1_shifts_com(inertia_env):
   """t1-only: mass unchanged, ipos[0] shifts by exactly t1."""
   env = inertia_env

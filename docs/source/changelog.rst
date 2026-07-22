@@ -8,6 +8,12 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added Full-Order and ROAM momentum-observer variants for the flat Unitree G1
+  velocity- and motion-tracking tasks. The estimated generalized-force residual is
+  appended to actor observations, includes viewer arrows and ONNX metadata, and can
+  be evaluated with fixed payload, foot-friction, joint-friction, and transient-
+  impulse OOD presets.
+
 Changed
 ^^^^^^^
 

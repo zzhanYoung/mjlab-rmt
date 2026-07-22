@@ -539,3 +539,68 @@ def pseudo_inertia(
   env.sim.model.body_ipos[env_grid, entity_grid] = ipos_new
   env.sim.model.body_inertia[env_grid, entity_grid] = inertia_new
   env.sim.model.body_iquat[env_grid, entity_grid] = iquat_new
+
+
+@requires_model_fields(
+  "body_mass",
+  "body_ipos",
+  "body_inertia",
+  "body_iquat",
+  recompute=RecomputeLevel.set_const,
+)
+def point_mass_payload(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  mass_range: tuple[float, float],
+  position: tuple[float, float, float] = (0.0, 0.0, 0.0),
+  distribution: Distribution | str = "uniform",
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Add a point-mass payload at a body-local position.
+
+  Mass, center of mass, and inertia are updated together by adding the payload's
+  pseudo-inertia matrix to the compile-time body pseudo-inertia. Repeated calls do
+  not accumulate. This is intended for fixed payload OOD evaluation rather than
+  uniform-density randomization.
+  """
+  if mass_range[0] < 0.0 or mass_range[1] < mass_range[0]:
+    raise ValueError("mass_range must be non-negative and ordered (min, max).")
+  if len(position) != 3:
+    raise ValueError("position must contain exactly three body-local coordinates.")
+
+  asset = env.scene[asset_cfg.name]
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
+  else:
+    env_ids = env_ids.to(env.device, dtype=torch.int)
+
+  entity_indices = _get_entity_indices(asset.indexing, asset_cfg, "body", False)
+  shape = (len(env_ids), len(entity_indices))
+  def_mass = _select_default_values(env, "body_mass", env_ids, entity_indices)
+  def_ipos = _select_default_values(env, "body_ipos", env_ids, entity_indices)
+  def_inertia = _select_default_values(env, "body_inertia", env_ids, entity_indices)
+  def_iquat = _select_default_values(env, "body_iquat", env_ids, entity_indices)
+  J_default = _reconstruct_pseudo_inertia_J(def_mass, def_ipos, def_inertia, def_iquat)
+
+  payload_mass = _sample_angle(distribution, mass_range, shape, env.device)
+  payload_pos = torch.tensor(position, dtype=J_default.dtype, device=env.device).expand(
+    *shape, 3
+  )
+  first_moment = payload_mass.unsqueeze(-1) * payload_pos
+
+  J_payload = torch.zeros_like(J_default)
+  J_payload[..., :3, :3] = payload_mass[..., None, None] * (
+    payload_pos.unsqueeze(-1) * payload_pos.unsqueeze(-2)
+  )
+  J_payload[..., :3, 3] = first_moment
+  J_payload[..., 3, :3] = first_moment
+  J_payload[..., 3, 3] = payload_mass
+
+  mass_new, ipos_new, inertia_new, iquat_new = _decompose_pseudo_inertia_J(
+    J_default + J_payload
+  )
+  env_grid, entity_grid = torch.meshgrid(env_ids, entity_indices, indexing="ij")
+  env.sim.model.body_mass[env_grid, entity_grid] = mass_new
+  env.sim.model.body_ipos[env_grid, entity_grid] = ipos_new
+  env.sim.model.body_inertia[env_grid, entity_grid] = inertia_new
+  env.sim.model.body_iquat[env_grid, entity_grid] = iquat_new

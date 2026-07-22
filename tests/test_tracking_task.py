@@ -5,6 +5,9 @@ import pytest
 from mjlab.asset_zoo.robots import G1_ACTION_SCALE
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.tasks.registry import list_tasks, load_env_cfg
+from mjlab.tasks.tracking.config.g1.env_cfgs import (
+  unitree_g1_flat_tracking_env_cfg,
+)
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 
 
@@ -132,3 +135,27 @@ def test_g1_tracking_has_correct_action_scale(g1_tracking_task_ids: list[str]) -
     assert joint_pos_action.scale == G1_ACTION_SCALE, (
       f"Task {task_id} action scale mismatch, expected G1_ACTION_SCALE"
     )
+
+
+def test_g1_tracking_observer_variants_registered() -> None:
+  variants = {
+    "Mjlab-Tracking-Flat-Unitree-G1-Full-Order": "full_order",
+    "Mjlab-Tracking-Flat-Unitree-G1-ROAM": "roam",
+  }
+  for task_id, mode in variants.items():
+    cfg = load_env_cfg(task_id)
+    assert "disturbance_estimate" in cfg.observations["actor"].terms
+    assert "disturbance_estimate" not in cfg.observations["critic"].terms
+    term = cfg.observations["actor"].terms["disturbance_estimate"]
+    assert term.params["mode"] == mode
+
+  baseline = load_env_cfg("Mjlab-Tracking-Flat-Unitree-G1")
+  assert "disturbance_estimate" not in baseline.observations["actor"].terms
+
+
+def test_g1_tracking_actor_base_velocity_toggle_keeps_critic_velocity() -> None:
+  default_cfg = unitree_g1_flat_tracking_env_cfg()
+  no_actor_velocity_cfg = unitree_g1_flat_tracking_env_cfg(actor_base_vel=False)
+  assert "base_lin_vel" in default_cfg.observations["actor"].terms
+  assert "base_lin_vel" not in no_actor_velocity_cfg.observations["actor"].terms
+  assert "base_lin_vel" in no_actor_velocity_cfg.observations["critic"].terms

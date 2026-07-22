@@ -15,6 +15,7 @@ import wandb
 
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+from mjlab.tasks.ood import OodShift, configure_ood_evaluation
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.mdp.commands import MotionCommand
@@ -45,6 +46,10 @@ class EvaluateConfig:
   """Optional path to save metrics as JSON."""
   log_root: str = "logs/rsl_rl"
   """Root directory under which experiment logs are written."""
+  ood_shift: OodShift = "nominal"
+  """Single fixed OOD shift to apply during evaluation."""
+  seed: int = 42
+  """Environment seed. Use the same seed across compared methods."""
 
 
 def run_evaluate(task_id: str, cfg: EvaluateConfig) -> dict[str, float]:
@@ -55,6 +60,8 @@ def run_evaluate(task_id: str, cfg: EvaluateConfig) -> dict[str, float]:
   # Load configs.
   env_cfg = load_env_cfg(task_id, play=False)
   agent_cfg = load_rl_cfg(task_id)
+  env_cfg = configure_ood_evaluation(env_cfg, cfg.ood_shift)
+  env_cfg.seed = cfg.seed
 
   motion_cmd = env_cfg.commands.get("motion")
   if not isinstance(motion_cmd, MotionCommandCfg):
@@ -70,8 +77,6 @@ def run_evaluate(task_id: str, cfg: EvaluateConfig) -> dict[str, float]:
 
   # Evaluation config.
   motion_cmd.sampling_mode = "start"
-  env_cfg.observations["actor"].enable_corruption = True
-  env_cfg.events.pop("push_robot", None)
   env_cfg.scene.num_envs = cfg.num_envs
 
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device)
@@ -99,6 +104,17 @@ def run_evaluate(task_id: str, cfg: EvaluateConfig) -> dict[str, float]:
   all_ee_pos_error: list[torch.Tensor] = []
   all_ee_ori_error: list[torch.Tensor] = []
   all_active: list[torch.Tensor] = []
+  episode_return = torch.zeros(cfg.num_envs, device=device)
+
+  actor_terms = env.unwrapped.observation_manager.active_terms["actor"]
+  observer = None
+  if "disturbance_estimate" in actor_terms:
+    observer = env.unwrapped.observation_manager.get_term_cfg(
+      "actor", "disturbance_estimate"
+    ).func
+  residual_sq_sum = torch.tensor(0.0, device=device)
+  residual_count = 0
+  residual_peak = torch.tensor(0.0, device=device)
 
   done_envs = torch.zeros(cfg.num_envs, dtype=torch.bool, device=device)
   success = torch.zeros(cfg.num_envs, dtype=torch.bool, device=device)
@@ -127,7 +143,7 @@ def run_evaluate(task_id: str, cfg: EvaluateConfig) -> dict[str, float]:
 
     with torch.no_grad():
       actions = policy(obs)
-    obs, _, dones, _ = env.step(actions)
+    obs, rewards, dones, _ = env.step(actions)
 
     # Pair the snapshotted reference with the post-step robot state.
     ref.robot_body_pos_w = command.robot_body_pos_w
@@ -140,6 +156,7 @@ def run_evaluate(task_id: str, cfg: EvaluateConfig) -> dict[str, float]:
     # done_envs is updated below after this point.
     active = ~done_envs
     all_active.append(active.float())
+    episode_return += torch.where(active, rewards, 0.0)
     all_mpkpe.append(torch.where(active, compute_mpkpe(ref_command), 0.0))
     all_r_mpkpe.append(
       torch.where(active, compute_root_relative_mpkpe(ref_command), 0.0)
@@ -153,6 +170,12 @@ def run_evaluate(task_id: str, cfg: EvaluateConfig) -> dict[str, float]:
     all_ee_ori_error.append(
       torch.where(active, compute_ee_orientation_error(ref_command, ee_body_names), 0.0)
     )
+    if observer is not None:
+      estimate = observer.estimate[active]
+      residual_sq_sum += torch.sum(torch.square(estimate))
+      residual_count += estimate.numel()
+      if estimate.numel() > 0:
+        residual_peak = torch.maximum(residual_peak, torch.max(torch.abs(estimate)))
 
     # Track completions.
     terminated = env.unwrapped.termination_manager.terminated
@@ -188,7 +211,14 @@ def run_evaluate(task_id: str, cfg: EvaluateConfig) -> dict[str, float]:
     "joint_vel_error": means[2].mean().item(),
     "ee_pos_error": means[3].mean().item(),
     "ee_ori_error": means[4].mean().item(),
+    "return": episode_return.mean().item(),
+    "survival_rate": (active_steps / env.unwrapped.max_episode_length).mean().item(),
   }
+  if observer is not None:
+    metrics["residual_rms"] = torch.sqrt(
+      residual_sq_sum / max(residual_count, 1)
+    ).item()
+    metrics["residual_peak"] = residual_peak.item()
 
   print("\n" + "=" * 50)
   print("Evaluation Results")
@@ -201,7 +231,16 @@ def run_evaluate(task_id: str, cfg: EvaluateConfig) -> dict[str, float]:
     output_path = Path(cfg.output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
-      json.dump(metrics, f, indent=2)
+      json.dump(
+        {
+          "task_id": task_id,
+          "ood_shift": cfg.ood_shift,
+          "seed": cfg.seed,
+          "metrics": metrics,
+        },
+        f,
+        indent=2,
+      )
     print(f"[INFO] Metrics saved to {output_path}")
 
   env.close()

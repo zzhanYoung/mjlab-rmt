@@ -27,6 +27,7 @@ from .body import body_ipos as body_ipos
 from .body import body_mass as body_mass
 from .body import body_pos as body_pos
 from .body import body_quat as body_quat
+from .body import point_mass_payload as point_mass_payload
 from .body import pseudo_inertia as pseudo_inertia
 
 # Joint / DOF.

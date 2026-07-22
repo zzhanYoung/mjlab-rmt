@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from typing import TYPE_CHECKING, Literal, Sequence
 
 import numpy as np
 import torch
@@ -12,6 +12,9 @@ from mjlab.managers.manager_base import ManagerBase, ManagerTermBaseCfg
 from mjlab.utils.buffers import CircularBuffer, DelayBuffer
 from mjlab.utils.noise import noise_cfg, noise_model
 from mjlab.utils.noise.noise_cfg import NoiseCfg, NoiseModelCfg
+
+if TYPE_CHECKING:
+  from mjlab.viewer.debug_visualizer import DebugVisualizer
 
 
 @dataclass
@@ -257,6 +260,18 @@ class ObservationManager(ManagerBase):
       for mod in group_mods.values():
         mod.reset(env_ids=env_ids)
     return {}
+
+  def debug_vis(self, visualizer: "DebugVisualizer") -> None:
+    """Delegate visualization to class-based observation terms."""
+    visited: set[int] = set()
+    for group_cfgs in self._group_obs_class_term_cfgs.values():
+      for term_cfg in group_cfgs:
+        func_id = id(term_cfg.func)
+        if func_id in visited:
+          continue
+        visited.add(func_id)
+        if hasattr(term_cfg.func, "debug_vis"):
+          term_cfg.func.debug_vis(visualizer)
 
   def _check_and_handle_nans(
     self, tensor: torch.Tensor, context: str, policy: str

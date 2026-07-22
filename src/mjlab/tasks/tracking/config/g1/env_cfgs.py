@@ -5,8 +5,14 @@ from mjlab.asset_zoo.robots import (
   get_g1_robot_cfg,
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.managers.observation_manager import ObservationGroupCfg
+from mjlab.envs.mdp.disturbance_observer import (
+  DisturbanceObserverVizCfg,
+  ObserverMode,
+)
+from mjlab.managers.metrics_manager import MetricsTermCfg
+from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
@@ -15,6 +21,8 @@ from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 def unitree_g1_flat_tracking_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
+  actor_base_vel: bool = True,
+  observer_mode: ObserverMode | None = None,
 ) -> ManagerBasedRlEnvCfg:
   """Create Unitree G1 flat terrain tracking configuration."""
   cfg = make_tracking_env_cfg()
@@ -75,12 +83,36 @@ def unitree_g1_flat_tracking_env_cfg(
     new_actor_terms = {
       k: v
       for k, v in cfg.observations["actor"].terms.items()
-      if k not in ["motion_anchor_pos_b", "base_lin_vel"]
+      if k != "motion_anchor_pos_b"
     }
     cfg.observations["actor"] = ObservationGroupCfg(
       terms=new_actor_terms,
       concatenate_terms=True,
       enable_corruption=True,
+    )
+
+  if not actor_base_vel or not has_state_estimation:
+    cfg.observations["actor"].terms.pop("base_lin_vel", None)
+  assert "base_lin_vel" in cfg.observations["critic"].terms
+
+  if observer_mode is not None:
+    cfg.observations["actor"].terms["disturbance_estimate"] = ObservationTermCfg(
+      func=envs_mdp.disturbance_observer,
+      params={
+        "mode": observer_mode,
+        "bandwidth_hz": 5.0,
+        "estimate_clip": 1000.0,
+        "debug_vis": play,
+        "viz_cfg": DisturbanceObserverVizCfg(),
+      },
+      clip=(-1000.0, 1000.0),
+    )
+    cfg.metrics["disturbance_estimate_rms"] = MetricsTermCfg(
+      func=envs_mdp.disturbance_estimate_rms
+    )
+    cfg.metrics["disturbance_estimate_peak"] = MetricsTermCfg(
+      func=envs_mdp.disturbance_estimate_peak,
+      reduce="max",
     )
 
   # Apply play mode overrides.

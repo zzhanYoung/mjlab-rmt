@@ -66,6 +66,9 @@ demo = "mjlab.scripts.demo:main"
 list-envs = "mjlab.scripts.list_envs:main"
 viz-nan = "mjlab.scripts.nan_viz:main"
 export-scene = "mjlab.scripts.export_scene:main"
+evaluate-g1-velocity = "mjlab.tasks.velocity.scripts.evaluate:main"
+evaluate-g1-tracking = "mjlab.tasks.tracking.scripts.evaluate:main"
+summarize-ood = "mjlab.tasks.summarize_ood:main"
 
 [dependency-groups]
 dev = [

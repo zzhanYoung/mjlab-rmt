@@ -138,6 +138,49 @@ Key ``play`` arguments:
     Disable termination conditions so the policy runs indefinitely.
 
 
+G1 disturbance-observer comparison
+----------------------------------
+
+The flat G1 velocity and motion tasks each provide three PPO configurations:
+
+- ``Mjlab-Velocity-Flat-Unitree-G1``
+- ``Mjlab-Velocity-Flat-Unitree-G1-Full-Order``
+- ``Mjlab-Velocity-Flat-Unitree-G1-ROAM``
+- ``Mjlab-Tracking-Flat-Unitree-G1``
+- ``Mjlab-Tracking-Flat-Unitree-G1-Full-Order``
+- ``Mjlab-Tracking-Flat-Unitree-G1-ROAM``
+
+Train each configuration with seeds 42, 43, and 44. The observer variants use a
+5 Hz bandwidth and append a 35-dimensional Full-Order or 32-dimensional ROAM
+estimate to the actor. Base linear velocity is enabled for these initial runs; the
+G1 config factories accept ``actor_base_vel=False`` for later ablations, without
+removing base velocity from the critic.
+
+Evaluate one checkpoint and one shift at a time:
+
+.. code-block:: bash
+
+    uv run evaluate-g1-velocity Mjlab-Velocity-Flat-Unitree-G1-ROAM \
+        --wandb-run-path entity/project/run-id \
+        --ood-shift payload_5kg --seed 42 \
+        --output-file results/velocity_roam_payload_5kg_seed42.json
+
+    uv run evaluate-g1-tracking Mjlab-Tracking-Flat-Unitree-G1-ROAM \
+        --wandb-run-path entity/project/run-id \
+        --ood-shift impulse_moderate --seed 42 \
+        --output-file results/tracking_roam_impulse_seed42.json
+
+Available shifts are ``nominal``, ``payload_5kg``, ``payload_10kg``,
+``foot_friction_0.15``, ``foot_friction_1.5``, ``joint_friction_0.5``,
+``joint_friction_1.0``, ``impulse_moderate``, and ``impulse_severe``. Aggregate the
+three seed files for each task/shift with:
+
+.. code-block:: bash
+
+    uv run summarize-ood --input-files seed42.json seed43.json seed44.json \
+        --output-file summary.json
+
+
 VecEnv wrapper
 --------------
 
